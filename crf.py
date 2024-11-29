@@ -4,7 +4,14 @@ import librosa
 from sklearn_crfsuite import CRF
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import (
+    accuracy_score,
+    roc_auc_score,
+    roc_curve,
+    precision_recall_curve,
+    auc,
+)
+import matplotlib.pyplot as plt
 import warnings
 
 # Suppress warnings
@@ -68,7 +75,7 @@ def train_crf_and_classifier(data, labels):
     refined_features = sequence_to_feature_vector(data)
     
     # Train logistic regression on refined features
-    classifier = LogisticRegression(max_iter=1000)
+    classifier = LogisticRegression(max_iter=1000)  # Removed multi_class='ovr'
     classifier.fit(refined_features, y)
 
     return crf_model, classifier, le
@@ -108,7 +115,58 @@ def evaluate(classifier, le, test_data, true_labels):
 
     predictions = classifier.predict(feature_vectors)
     accuracy = accuracy_score(true_labels, predictions)
-    return accuracy
+    return accuracy, predictions
+
+def compute_auc_metrics(true_labels, predictions, classes):
+    """Compute AUC-ROC and AUC-PRC metrics."""
+    roc_auc_scores = []
+    prc_auc_scores = []
+    for class_label in range(len(classes)):
+        true_binary = (true_labels == class_label).astype(int)
+        predicted_binary = (predictions == class_label).astype(int)
+        if len(np.unique(true_binary)) > 1:  # Avoid errors for single-class data
+            roc_auc = roc_auc_score(true_binary, predicted_binary)
+            precision, recall, _ = precision_recall_curve(true_binary, predicted_binary)
+            prc_auc = auc(recall, precision)
+            roc_auc_scores.append(roc_auc)
+            prc_auc_scores.append(prc_auc)
+
+    average_roc_auc = np.mean(roc_auc_scores)
+    average_prc_auc = np.mean(prc_auc_scores)
+    return average_roc_auc, average_prc_auc
+
+def plot_roc_curve(true_labels, predictions, classes):
+    """Plot ROC curves for all classes."""
+    plt.figure(figsize=(10, 7))
+    for class_label in range(len(classes)):
+        true_binary = (true_labels == class_label).astype(int)
+        predicted_binary = (predictions == class_label).astype(int)
+        if len(np.unique(true_binary)) > 1:  # Avoid errors for single-class data
+            fpr, tpr, _ = roc_curve(true_binary, predicted_binary)
+            plt.plot(fpr, tpr, label=f"Class {classes[class_label]} (AUC: {auc(fpr, tpr):.2f})")
+    plt.plot([0, 1], [0, 1], "k--")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve")
+    plt.legend(loc="best")
+    plt.grid()
+    plt.show()
+
+def plot_prc_curve(true_labels, predictions, classes):
+    """Plot PRC curves for all classes."""
+    plt.figure(figsize=(10, 7))
+    for class_label in range(len(classes)):
+        true_binary = (true_labels == class_label).astype(int)
+        predicted_binary = (predictions == class_label).astype(int)
+        if len(np.unique(true_binary)) > 1:  # Avoid errors for single-class data
+            precision, recall, _ = precision_recall_curve(true_binary, predicted_binary)
+            plt.plot(recall, precision, label=f"Class {classes[class_label]} (AUC: {auc(recall, precision):.2f})")
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.title("Precision-Recall Curve")
+    plt.legend(loc="best")
+    plt.grid()
+    plt.show()
 
 # ========== Main Execution ==========
 
@@ -129,8 +187,19 @@ if __name__ == "__main__":
     print(f"Loaded {len(test_data)} test samples.")
 
     print("Evaluating model...")
-    accuracy = evaluate(classifier, le, test_data, true_labels)
+    accuracy, predictions = evaluate(classifier, le, test_data, true_labels)
     print(f"Model Accuracy: {accuracy * 100:.2f}%")
+
+    print("Computing AUC metrics...")
+    avg_roc_auc, avg_prc_auc = compute_auc_metrics(true_labels, predictions, le.classes_)
+    print(f"Average AUC-ROC: {avg_roc_auc:.2f}")
+    print(f"Average AUC-PRC: {avg_prc_auc:.2f}")
+
+    print("Plotting ROC curve...")
+    plot_roc_curve(true_labels, predictions, le.classes_)
+
+    print("Plotting PRC curve...")
+    plot_prc_curve(true_labels, predictions, le.classes_)
 
     # Test on a single audio file
     test_audio_file = "test_data/cat/43.wav"  # Replace with a valid file path

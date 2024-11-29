@@ -3,7 +3,8 @@ import numpy as np
 import librosa
 from hmmlearn import hmm
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score, roc_curve, precision_recall_curve
+import matplotlib.pyplot as plt
 import warnings
 import logging
 
@@ -104,6 +105,55 @@ def evaluate(models, le, test_data, true_labels):
     accuracy = accuracy_score(true_labels, predictions)
     return accuracy
 
+def compute_auc_metrics(models, le, test_data, true_labels):
+    """Compute AUC-ROC and AUC-PRC for the recognition system."""
+    true_labels_one_hot = np.eye(len(le.classes_))[true_labels]  # One-hot encoding for multi-class AUC
+    scores_matrix = []
+
+    for mfcc in test_data:
+        scores = np.array([model.score(mfcc) for model in models.values()])
+        normalized_scores = scores - np.max(scores)  # Numerical stability
+        scores_exp = np.exp(normalized_scores)
+        probabilities = scores_exp / np.sum(scores_exp)  # Softmax
+        scores_matrix.append(probabilities)
+
+    scores_matrix = np.array(scores_matrix)
+
+    # AUC-ROC and AUC-PRC for each class
+    roc_auc = []
+    prc_auc = []
+
+    for i, class_name in enumerate(le.classes_):
+        roc_auc.append(roc_auc_score(true_labels_one_hot[:, i], scores_matrix[:, i]))
+        prc_auc.append(average_precision_score(true_labels_one_hot[:, i], scores_matrix[:, i]))
+
+        # Plot ROC curve for this class
+        fpr, tpr, _ = roc_curve(true_labels_one_hot[:, i], scores_matrix[:, i])
+        plt.plot(fpr, tpr, label=f"Class {class_name} (AUC={roc_auc[-1]:.2f})")
+
+    plt.title("ROC Curve")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.legend()
+    plt.show()
+
+    # Plot Precision-Recall curve
+    for i, class_name in enumerate(le.classes_):
+        precision, recall, _ = precision_recall_curve(true_labels_one_hot[:, i], scores_matrix[:, i])
+        plt.plot(recall, precision, label=f"Class {class_name} (AUC={prc_auc[-1]:.2f})")
+
+    plt.title("Precision-Recall Curve")
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.legend()
+    plt.show()
+
+    # Average metrics
+    avg_roc_auc = np.mean(roc_auc)
+    avg_prc_auc = np.mean(prc_auc)
+
+    return avg_roc_auc, avg_prc_auc
+
 # ========== Main Execution ==========
 
 if __name__ == "__main__":
@@ -125,6 +175,11 @@ if __name__ == "__main__":
     print("Evaluating model...")
     accuracy = evaluate(models, le, test_data, true_labels)
     print(f"Model Accuracy: {accuracy * 100:.2f}%")
+
+    print("Computing AUC metrics...")
+    avg_roc_auc, avg_prc_auc = compute_auc_metrics(models, le, test_data, true_labels)
+    print(f"Average AUC-ROC: {avg_roc_auc:.2f}")
+    print(f"Average AUC-PRC: {avg_prc_auc:.2f}")
 
     # Test on a single audio file
     test_audio_file = "test_data/cat/43.wav"  # Replace with a valid file path
